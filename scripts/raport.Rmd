@@ -1,0 +1,1749 @@
+---
+title: "Spectral clustering algorithm"
+date: "Warszawa, 2019"
+output: 
+  pdf_document:
+      highlight: pygments
+      number_sections: yes
+
+
+
+papersize: a4
+theme: spacelab  
+
+fontsize: 11pt
+geometry: "left=2cm,right=1cm, top=2cm,bottom=2cm"
+header-includes: \setlength\parindent{24pt}
+fig_width: 6 
+fig_height: 4
+always_allow_html: yes
+---
+
+\newpage
+
+\tableofcontents
+
+\newpage
+
+# Wstęp
+
+Poniższy dokument przedstawia analizę danych benchmarkowych przy wykorzystaniu pięciu algorytmów analizy skupień (*spectral clustering*). 
+
+## Testowane algorytmy
+
+Przetestowane zostały następujące algorytmy analizy skupień:    
+- własna implementacja algorytmu spektralnego    
+- algorytmy hierarchiczne z funkcji *hclust()*    
+- algorytm *Genie* z pakietu **genie**    
+- *HCPC* - Hierarchical Clustering on Principal Components  
+- *cmeans*  
+
+## Ocena jakości algorytmów
+
+Do oceny podobieństwa dwóch *k*-podziałów zostały użyte następujące indeksy:  
+- skorygowany indeks Randa (**AR**) - indeks ten pozwala ocenić zgodność dwóch podziałów na zbioru na rozłączne podzbiory.
+- indeks Fowlkesa-Mallowsa (**MS**) 
+
+## Zawartość poszczególnych folderów
+
+- *benchmarkPlots* - wykresy danych zbiorów benchmarkowych
+- *benchmarkResults* - pliki *.csv* zawierające wyniki poszczególnych algorytmów
+    - pliki _\*STAND.csv_ - zawierają wyniki poszczególnych algorytmów przy uwzględnieniu standaryzacji zmiennych (kolumn w **X**)    
+    - pozostałe pliki - zawierają wyniki poszczególnych algorytmów bez uwzględnienia standaryzacji zmiennych (kolumn w **X**)
+- *myBenchmark* - pliki *.data* oraz *.labels0* stworzonych przeze mnie zbiorów benchmarkowych
+- *pd2-zbiory-benchmarkowe* - ściągnienie ze strony zbiory benchmarkowe
+- *scripts* - skrypty wykorzystywane do tworzenia wyników
+- *tasks* - treść pracy domowej
+
+## Uwagi
+
+Uwaga 1: W sprawozdaniu nie dodawałem wykresów przedstawiających poszczególne zbiory danych (uznałem, iż nie jest to konieczne). Natomiast w folderze *benchmarkPlots* są przedstawiane dane zbiory o nazwach w kolejności wystąpienia. 
+
+
+\newpage
+
+# Funkcja testująca
+
+Poniższy kod testujący powstal w celu zautomatyzywania badania poszczególnych algorytmów oraz ich zapis do plików *.csv*. Przedstawiony poniżej kod można też znaleźć w pliku *raport.R* (jest on zamieszczony wraz z przykładowymi wywołaniami). Opis funkcji znajduje się pod listingiem kodu.
+
+## Potrzebne pakiety
+
+```{r lib, echo=TRUE, warning=FALSE, eval=FALSE}
+library("mclust")
+library("genie")
+library("FactoMineR")
+library("e1071")
+source("spectral.R")
+
+
+menu <- function(choseAlgorithm="spectral_clustering", stand=FALSE, params=NULL){
+  
+  path <- getwd()
+  path <- normalizePath("..")
+  dirPath <- file.path(path, "pd2-zbiory-benchmarkowe")
+  data <- list.files(dirPath, "data\\.gz$", recursive=TRUE)
+  dataLabels <- list.files(dirPath, "labels0\\.gz$", recursive=TRUE)
+  
+  # deciding how many digits after period
+  decimalPlaces <- 3
+  
+  if (choseAlgorithm == "spectral_clustering"){
+    # check if all params all natural 
+    stopifnot(all(is.natural.number(params)))
+    
+    inFM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+    inAM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+  }
+  
+  
+  if (choseAlgorithm == "hclust"){
+    methodList = list("ward.D", "ward.D2", "single", "complete", 
+                      "average", "mcquitty", "median", "centroid")
+    
+    inFM <- data.frame(matrix(ncol = length(methodList), nrow = length(data)))
+    inAM <- data.frame(matrix(ncol = length(methodList), nrow = length(data)))
+  }
+  
+  if (choseAlgorithm == "genie"){
+    stopifnot(all( (params > 0) & (params < 1)))
+    
+    inFM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+    inAM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+  }
+  
+  if (choseAlgorithm == "HCPC"){
+    inFM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+    inAM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+  }
+  
+  if (choseAlgorithm == "cmeans"){
+    inFM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+    inAM <- data.frame(matrix(ncol = length(params), nrow = length(data)))
+  }
+  
+  
+  for (iter in 1:length(data)){
+    
+    X <- read.table(file.path(dirPath, data[iter]), header = FALSE,
+                    sep = "", dec = ".")
+    labels <- read.table(file.path(dirPath, dataLabels[iter]), header = FALSE,
+                         sep = "", dec = ".")
+    
+    if(stand == TRUE){
+      X <- as.data.frame(scale(X))
+    }
+    
+    if (choseAlgorithm == "spectral_clustering"){
+      for (iterParams in 1:length(params)){
+        
+        result <- spectral_clustering(X, length(unique(labels$V1)), params[iterParams])
+        
+        calculatedLabel <- result
+        
+        inFM[iter, iterParams] <- round(as.numeric(FM_index(labels$V1, calculatedLabel)), 
+                                        decimalPlaces)
+        inAM[iter, iterParams] <- round(as.numeric(mclust::adjustedRandIndex(labels$V1, 
+                                                   calculatedLabel)), decimalPlaces)
+        
+        # naming columns
+        colnames(inFM)[iterParams] <- paste("FM M", params[iterParams], sep = " ")
+        colnames(inAM)[iterParams] <- paste("AM M", params[iterParams], sep = " ")
+      }
+    }
+    
+    if (choseAlgorithm == "hclust"){
+      for (iterMethod in 1:length(methodList)){
+        
+        result <- hclust(dist(X, method = "euclidean"), method = methodList[iterMethod])
+        calculatedLabel <- cutree(result, length(unique(labels$V1)))
+        
+        # we round our result to two decimal places 
+        inFM[iter, iterMethod] <- round(as.numeric(FM_index(labels$V1, calculatedLabel)), 
+                                        decimalPlaces)
+        inAM[iter, iterMethod] <- round(as.numeric(mclust::adjustedRandIndex(labels$V1, 
+                                                   calculatedLabel)), decimalPlaces)
+      
+        # naming columns
+        colnames(inFM)[iterMethod] <- paste("FM", methodList[iterMethod], sep = " ")
+        colnames(inAM)[iterMethod] <- paste("AM", methodList[iterMethod], sep = " ")
+        
+      }
+    }
+    
+    if (choseAlgorithm == "genie"){
+      for (iterParams in 1:length(params)){
+        
+        result <- genie::hclust2(object = as.matrix(dist(X, method = "euclidean")),
+                                 thresholdGini = params[iterParams])
+        calculatedLabel <- cutree(result, length(unique(labels$V1)))
+        
+        inFM[iter, iterParams] <- round(as.numeric(FM_index(labels$V1, calculatedLabel)), 
+                                        decimalPlaces)
+        inAM[iter, iterParams] <- round(as.numeric(mclust::adjustedRandIndex(labels$V1, 
+                                                   calculatedLabel)), decimalPlaces)
+        
+        # naming columns
+        colnames(inFM)[iterParams] <- paste("FM tG", params[iterParams], sep = " ")
+        colnames(inAM)[iterParams] <- paste("AM tG", params[iterParams], sep = " ")
+      }
+    }
+    
+    # Hierarchical Clustering on Principal Components
+    if (choseAlgorithm == "HCPC"){
+      for (iterParams in 1:length(params)){
+        #X.pca <- PCA(X, graph=FALSE)
+        result <- FactoMineR::HCPC(res = X, nb.clust=length(unique(labels$V1)), 
+                                   graph=FALSE)
+        
+        calculatedLabel <- result$data.clust$clust
+        
+        inFM[iter, iterParams] <- round(as.numeric(FM_index(labels$V1, calculatedLabel)), 
+                                        decimalPlaces)
+        inAM[iter, iterParams] <- round(as.numeric(mclust::adjustedRandIndex(labels$V1, 
+                                                   calculatedLabel)), decimalPlaces)
+        
+        colnames(inFM)[iterParams] <- paste("FM proba", params[iterParams], sep = " ")
+        colnames(inAM)[iterParams] <- paste("AM proba", params[iterParams], sep = " ")
+      
+      }
+    }
+    
+    if (choseAlgorithm == "cmeans"){
+      for (iterParams in 1:length(params)){
+        #input <- as.SparseSimilarityMatrix(as.matrix(dist(X, method = "euclidean")), 
+        #lower=-0.2)
+        
+        result <- cmeans(x=X, centers = length(unique(labels$V1)), dist='euclidean',
+                         m=params[iterParams])
+
+        calculatedLabel = result$cluster
+        
+        inFM[iter, iterParams] <- round(as.numeric(FM_index(labels$V1, calculatedLabel)),
+                          decimalPlaces)
+        inAM[iter, iterParams] <- round(as.numeric(mclust::adjustedRandIndex(labels$V1, 
+                                        calculatedLabel)), decimalPlaces)
+        
+        colnames(inFM)[iterParams] <- paste("FM rate.par", params[iterParams], sep = " ")
+        colnames(inAM)[iterParams] <- paste("AM rate.par", params[iterParams], sep = " ")
+        
+      }
+    }
+  }
+  
+  output <- data.frame(inAM, inFM)
+  
+  finalDataframe <- data.frame(data, output)
+  # we save result to file 
+  savePath <- paste("../benchmarkResults", paste(choseAlgorithm, stand, by="_"), sep="/") 
+  write.csv(finalDataframe, file = paste(savePath, "csv", sep = "."))
+  
+  finalDataframe
+}
+```
+
+## Opis funkcji
+
+Funkcja ta przyjmuje jako parametry wejściowe:
+
+1. *choseAlgorithm* - wybrany algorytm do analizy skupień:
+   - *spectral_clustering* - zaimplementowany przeze mnie algorytm spektralny
+   - *hclust*
+   - *genie*
+   - *HCPC* - Hierarchical Clustering on Principal Components
+   - *cmeans*
+2. *stand* - wartość boolean informująca czy ma być przeprawadzana standaryzacja (*TRUE*) czy nie (*FALSE*)
+3. *params* - wektor z wartościami parameterów danej funkcji
+
+W metodach sprawdzam czy argumenty wejściowe są poprawne wpisane (poprzez wykorzystanie funkcji *stopifnot*).
+
+## Przykładowe wywołania funkcji
+
+```{r echo=TRUE, warning=FALSE, eval=FALSE}
+# spectral_clustering
+params <- seq(2, 10, 1)
+output_SC <- menu("spectral_clustering", stand=TRUE, params)
+
+# hclust
+output_HC <- menu("hclust", stand=TRUE, params=c(NA))
+
+# genie
+params <- seq(0.1, 0.9, by=0.1)
+output_G <- menu("genie", stand=TRUE, params)
+
+# HCPC
+output_HCPC <- menu("HCPC", stand=TRUE, c(NA))
+
+# cmeans
+params <- c(2, 3, 4, 5, 6, 7, 8)
+output_AP <- menu("cmeans", stand=TRUE, params=params)
+
+```
+
+\newpage
+# Algorytm spektralny 
+
+## Implementacja algorytmu
+
+Implementajca pszczególnych funkcji algorytmu spektralnego znajdują się w pliku *spectral.R*. Dane linijki kodu komentowałem w trakcie pisania. Ewentualne inne rozwiązania danego zadania zamieściłem w komentarzach. Głównym powodem dla który wybierałem jeden sposób było przede wszystkim szybkość działania poszczególnego sposobu. 
+
+### Funkcja *Mnn*
+
+```{r echo=TRUE, warning=FALSE, dependson='lib'}
+Mnn <- function(X, M){
+  # calculate the distance beetween two points and save it as a matrix
+  distOutput <- as.matrix(dist(X), method = "euclidean")
+  
+  # order the matrix 
+  orderedOutput <- apply(distOutput, 2, order)
+  # in first column is the same column value (1 - 1) so we want to delete it
+  orderedOutput <- orderedOutput[-1, ]
+  
+  # choose only this rows, which are the closest
+  # t function to transpose result
+  S <- t(orderedOutput[1:M, ])
+  
+}
+```
+
+### Funkcja *Mnn_graph*
+
+W tej funkcji dane składowe łączyłem za pomocą pętli *while*. Po tesstach zauważyłem, iż nie jest to wolny sposób. Jednym z decyzji, jakie podjąłem, było łączenie danych składowych (gdy liczba składowych jest większa niż 1). Postanowiłem, iż najlepszym rozwiązaniem (a zarazem najłatwiejszym) będzie połączenie poszczególnych składowych łącząc krawędzie o najniższych liczbach.
+
+```{r echo=TRUE, warning=FALSE, dependson='lib'}
+Mnn_graph <- function(S){
+  # convert into adjacency matrix
+  G <- matrix(0, nrow = nrow(S), ncol = nrow(S))
+  
+  for(row in 1:nrow(S)) {
+    for(col in 1:ncol(S)) {
+      G[row, S[row, col]] <- 1
+      G[S[row, col], row] <- 1
+    }
+  }
+  
+  # creating a graph from a adjacency matrix
+  ourGraph <- graph_from_adjacency_matrix(G, mode = c("undirected"), 
+                                          weighted = NULL, diag = FALSE)
+  
+  # calculating number of graph component
+  comp <- components(ourGraph)
+  componentsGroups <- groups(comp)
+  componentsNumber <- length(componentsGroups)
+  
+  # if the number of component is bigger than 1 we add some edges
+  while (componentsNumber != 1) {
+    G[componentsGroups[[componentsNumber]][1], 
+      componentsGroups[[componentsNumber-1]][1]] <- 1
+    G[componentsGroups[[componentsNumber-1]][1], 
+      componentsGroups[[componentsNumber]][1]] <- 1
+    componentsNumber <- componentsNumber - 1
+  }
+  
+  G
+}
+```
+
+### Funkcja *Laplacian_eigen*
+
+```{r echo=TRUE, warning=FALSE, dependson='lib'}
+Laplacian_eigen <- function(G, k){
+  stopifnot(k > 1)
+  
+  # creating graph to calculate a degree of a vertex 
+  # (optional solution: sum of a row or a column)
+  ourGraph <- graph_from_adjacency_matrix(G, mode = c("undirected"), 
+                                          weighted = NULL, diag = FALSE)
+  
+  # first solution
+  # calculating a degree of a vertex
+  #vertexDegree <- degree(ourGraph)
+  
+  # using diag function create D matrix
+  #D = diag(vertexDegree, nrow(G), ncol(G))
+  #L = D - G
+  
+  # second solution
+  L <- laplacian_matrix(ourGraph)
+  
+  #stopifnot(isSymmetric(L))
+  #eigenStructure <- eigen(L, symmetric = TRUE) # <- too slow
+  
+  # SA - the smallest(leftmost) values
+  eigenStructure <- eigs_sym(L, 10 * k, which = "SA")
+  
+  vectorNumbers <- k + 1
+  
+  E <-  eigenStructure$vectors[, (ncol
+                                  (eigenStructure$vectors) - k + 1)
+                               :ncol(eigenStructure$vectors)]
+  
+  # alternatives (when we use a eigen function):
+  #E <- eigenStructure$vectors[, order(eigenStructure$values,
+  # decreasing = FALSE)[1:vectorNumbers]]
+  
+  E
+}
+```
+
+### Funkcja *spectral_clustering*
+
+Efektem finalnym jest funkcja *spectral_clustering*. Wykorzystuje ona wcześniej zaimplementowane funkcje oraz korzysta dodatkowo z funkcji *kmeans*, która w sposób losowy wybiera punkt początkowy. Rodzi to pewne problemy - testując daną funkcję najlepiej to wykonać kilka razy a następnie obliczyć średnią z danych eksperymnetów. Ze wzgędu na skomplikowaność zadania postanowiłem tego nie wykonywać (badałem jedną próbę). 
+
+```{r echo=TRUE, warning=FALSE, dependson='lib'}
+spectral_clustering <- function(X, M, k){
+  S <- Mnn(X, M)
+  G <- Mnn_graph(S)
+  E <- Laplacian_eigen(G, k)
+  kmeans(E, k)$cluster
+}
+```
+
+## Badanie algorytmu na wszystkich zbiorach benchmarkowych
+
+Jak już wspomniałem poprzez losowość funkcji *kmeans* wyniki przy danych wykonaniach mogą się różnić. 
+
+### Bez standaryzacji zmiennych
+
+Pierwszym etapem przy badaniu algorytmu *spectral_clustering* było wyznaczenie błędów metody dla różnych wartości parametrów *M*. Wszystkie wartości przedstawione w poniższej tabeli są również zapisane w pliku *spectral_clustering.csv*.
+
+#### Zbiory dostarczone
+
+```{r first, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/spectral_clustering.csv")
+x <- as.data.frame(summary) 
+x1 <- x
+```
+
+Wartości indeksów AM dla różnych parametrów *M* są przedstawione ponżej: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='first'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                   "9" = x[, 9], 
+                   "10" = x[, 10],
+                   check.names=FALSE))
+
+
+```
+
+Wartości indeksów FM dla różnych parametrów *M* są przedstawione ponżej:
+
+```{r echo=FALSE, warning=FALSE,  dependson='first'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 11],
+                   "3" = x[, 12],
+                   "4" = x[, 13],
+                   "5" = x[, 14],
+                   "6" = x[, 15], 
+                   "7" = x[, 16],
+                   "8" = x[, 17], 
+                   "9" = x[, 18], 
+                   "10" = x[, 19],
+                    check.names=FALSE))
+  
+
+
+```
+
+
+#### Moje zbiory danych
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+```{r fM, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_spectral_clustering.csv")
+x <- as.data.frame(summary) 
+```
+
+Wartości indeksów AM dla różnych parametrów *M* są przedstawione ponżej:
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='fM'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                   "9" = x[, 9], 
+                   "10" = x[, 10],
+                    check.names=FALSE))
+
+
+```
+
+Wartości indeksów FM dla różnych parametrów *M* są przedstawione ponżej:
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='fM'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 11],
+                   "3" = x[, 12],
+                   "4" = x[, 13],
+                   "5" = x[, 14],
+                   "6" = x[, 15], 
+                   "7" = x[, 16],
+                   "8" = x[, 17], 
+                   "9" = x[, 18], 
+                   "10" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+source("spectral.R")
+
+
+X <- read.table("../pd2-zbiory-benchmarkowe/wut/z3.data.gz ", header = FALSE, sep = "", dec = ".")
+label <- read.table("../pd2-zbiory-benchmarkowe/wut/z3.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- spectral_clustering(X, M = 4, k = length(unique(label$V1)))
+calculatedLabel <- result
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], type = "p", col=label$V1)
+
+  
+```
+
+\newpage
+### Ze standaryzacją zmiennych
+
+#### Zbiory dostaczone
+
+```{r sc_STA, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/spectral_clustering_STAND.csv")
+x <- as.data.frame(summary)
+x1S <- x
+```
+
+
+Wartości indeksów AM dla różnych parametrów *M*: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='first'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                   "9" = x[, 9], 
+                   "10" = x[, 10],
+                    check.names=FALSE))
+
+
+```
+
+Wartości indeksów FM dla różnych parametrów *M*:
+
+```{r echo=FALSE, warning=FALSE,  dependson='first'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 11],
+                   "3" = x[, 12],
+                   "4" = x[, 13],
+                   "5" = x[, 14],
+                   "6" = x[, 15], 
+                   "7" = x[, 16],
+                   "8" = x[, 17], 
+                   "9" = x[, 18], 
+                   "10" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+
+```{r fM_STAND, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_spectral_clustering_STAND.csv")
+x <- as.data.frame(summary) 
+```
+
+Wartości indeksów AM dla różnych parametrów *M* są przedstawione ponżej:
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='fM_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                   "9" = x[, 9], 
+                   "10" = x[, 10],
+                    check.names=FALSE))
+
+
+```
+
+Wartości indeksów FM dla różnych parametrów *M* są przedstawione ponżej:
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='fM_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 11],
+                   "3" = x[, 12],
+                   "4" = x[, 13],
+                   "5" = x[, 14],
+                   "6" = x[, 15], 
+                   "7" = x[, 16],
+                   "8" = x[, 17], 
+                   "9" = x[, 18], 
+                   "10" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+source("spectral.R")
+
+
+X <- read.table("../pd2-zbiory-benchmarkowe/wut/z3.data.gz ", header = FALSE, sep = "", dec = ".")
+
+X <- as.data.frame(scale(X))
+
+label <- read.table("../pd2-zbiory-benchmarkowe/wut/z3.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- spectral_clustering(X, M = 4, k = length(unique(label$V1)))
+calculatedLabel <- result
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], type = "p", col=label$V1)
+
+  
+```
+
+
+\newpage
+# Algorytm *hclust*
+
+## Badanie algorytmu na wszystkich zbiorach benchmarkowych
+
+### Bez standaryzacji zmiennych
+
+#### Zbiory dostarczone
+
+```{r second, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/hclust.csv")
+x <- as.data.frame(summary)
+
+x2 <- x
+```
+
+Wartości indeksów AM dla różnych algorytmów hierarchicznych: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='second'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 2],
+                   "ward.D2" = x[, 3],
+                   "single" = x[, 4],
+                   "complete" = x[, 5],
+                   "average" = x[, 6], 
+                   "mcquitty" = x[, 7],
+                   "median" = x[, 8], 
+                   "centroid" = x[, 9], 
+                    check.names=FALSE))
+
+
+```
+
+
+Wartości indeksów FM dla różnych algorytmów hierarchicznych: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='second'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 10],
+                   "ward.D2" = x[, 11],
+                   "single" = x[, 12],
+                   "complete" = x[, 13],
+                   "average" = x[, 14], 
+                   "mcquitty" = x[, 15],
+                   "median" = x[, 16], 
+                   "centroid" = x[, 17], 
+                    check.names=FALSE))
+
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+```{r sMCL, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_hclust.csv")
+x <- as.data.frame(summary) 
+```
+
+Wartości indeksów AM dla różnych algorytmów hierarchicznych są przedstawione poniżej: 
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='sMCL'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 2],
+                   "ward.D2" = x[, 3],
+                   "single" = x[, 4],
+                   "complete" = x[, 5],
+                   "average" = x[, 6], 
+                   "mcquitty" = x[, 7],
+                   "median" = x[, 8], 
+                   "centroid" = x[, 9], 
+                    check.names=FALSE))
+
+
+```
+
+
+Wartości indeksów FM dla różnych algorytmów hierarchicznych są przedstawione poniżej: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='sMCL'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 10],
+                   "ward.D2" = x[, 11],
+                   "single" = x[, 12],
+                   "complete" = x[, 13],
+                   "average" = x[, 14], 
+                   "mcquitty" = x[, 15],
+                   "median" = x[, 16], 
+                   "centroid" = x[, 17], 
+                    check.names=FALSE))
+
+
+```
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("mclust")
+
+X <- read.table("../pd2-zbiory-benchmarkowe/wut/x1.data.gz", header = FALSE, sep = "", dec = ".")
+
+label <- read.table("../pd2-zbiory-benchmarkowe/wut/x1.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- hclust(dist(X, method = "euclidean"), method = "ward.D")
+calculatedLabel <- cutree(result, length(unique(label$V1)))
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+
+
+```
+
+\newpage
+### Ze standaryzacją zmiennych
+
+#### Zbiory dostarczone
+
+```{r hc_TA, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/hclust_STAND.csv")
+x <- as.data.frame(summary)
+x2S <- x
+```
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='hc_TA'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 2],
+                   "ward.D2" = x[, 3],
+                   "single" = x[, 4],
+                   "complete" = x[, 5],
+                   "average" = x[, 6], 
+                   "mcquitty" = x[, 7],
+                   "median" = x[, 8], 
+                   "centroid" = x[, 9], 
+                    check.names=FALSE))
+
+
+```
+
+
+Wartości indeksów FM dla różnych algorytmów hierarchicznych: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='hc_TA'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 10],
+                   "ward.D2" = x[, 11],
+                   "single" = x[, 12],
+                   "complete" = x[, 13],
+                   "average" = x[, 14], 
+                   "mcquitty" = x[, 15],
+                   "median" = x[, 16], 
+                   "centroid" = x[, 17], 
+                    check.names=FALSE))
+
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+```{r sMCL_STAND, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_hclust_STAND.csv")
+x <- as.data.frame(summary) 
+```
+
+Wartości indeksów AM dla różnych algorytmów hierarchicznych są przedstawione poniżej: 
+
+
+```{r echo=FALSE, warning=FALSE,  dependson='sMCL_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 2],
+                   "ward.D2" = x[, 3],
+                   "single" = x[, 4],
+                   "complete" = x[, 5],
+                   "average" = x[, 6], 
+                   "mcquitty" = x[, 7],
+                   "median" = x[, 8], 
+                   "centroid" = x[, 9], 
+                    check.names=FALSE))
+
+
+```
+
+
+Wartości indeksów FM dla różnych algorytmów hierarchicznych są przedstawione poniżej: 
+
+```{r echo=FALSE, warning=FALSE,  dependson='sMCL_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "ward.D" = x[, 10],
+                   "ward.D2" = x[, 11],
+                   "single" = x[, 12],
+                   "complete" = x[, 13],
+                   "average" = x[, 14], 
+                   "mcquitty" = x[, 15],
+                   "median" = x[, 16], 
+                   "centroid" = x[, 17], 
+                    check.names=FALSE))
+
+
+```
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("mclust")
+
+X <- read.table("../pd2-zbiory-benchmarkowe/wut/x1.data.gz", header = FALSE, sep = "", dec = ".")
+
+X <- as.data.frame(scale(X))
+
+label <- read.table("../pd2-zbiory-benchmarkowe/wut/x1.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- hclust(dist(X, method = "euclidean"), method = "ward.D")
+calculatedLabel <- cutree(result, length(unique(label$V1)))
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+
+
+```
+
+
+\newpage
+# Algorytm *Genie* z pakietu **genie**
+
+## Badanie algorytmu na wszystkich zbiorach benchmarkowych
+
+### Bez standaryzacji zmiennych
+
+#### Zbiory dostaczone
+
+```{r third, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/genie.csv")
+x <- as.data.frame(summary)
+
+x3 <- x
+```
+
+
+
+```{r echo=FALSE, warning=FALSE, dependson='third'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 2],
+                   "0.2" = x[, 3],
+                   "0.3" = x[, 4],
+                   "0.4" = x[, 5],
+                   "0.5" = x[, 6], 
+                   "0.6" = x[, 7],
+                   "0.7" = x[, 8], 
+                   "0.8" = x[, 9], 
+                   "0.9" = x[, 10],
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='third'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 11],
+                   "0.2" = x[, 12],
+                   "0.3" = x[, 13],
+                   "0.4" = x[, 14],
+                   "0.5" = x[, 15], 
+                   "0.6" = x[, 16],
+                   "0.7" = x[, 17], 
+                   "0.8" = x[, 18], 
+                   "0.9" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+```{r my_gen, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_genie.csv")
+x <- as.data.frame(summary) 
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_gen'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 2],
+                   "0.2" = x[, 3],
+                   "0.3" = x[, 4],
+                   "0.4" = x[, 5],
+                   "0.5" = x[, 6], 
+                   "0.6" = x[, 7],
+                   "0.7" = x[, 8], 
+                   "0.8" = x[, 9], 
+                   "0.9" = x[, 10],
+                    check.names=FALSE))
+
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_gen'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 11],
+                   "0.2" = x[, 12],
+                   "0.3" = x[, 13],
+                   "0.4" = x[, 14],
+                   "0.5" = x[, 15], 
+                   "0.6" = x[, 16],
+                   "0.7" = x[, 17], 
+                   "0.8" = x[, 18], 
+                   "0.9" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+#### przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("genie")
+
+X <- read.table("../pd2-zbiory-benchmarkowe/fcps/twodiamonds.data.gz", header = FALSE, sep = "", dec = ".")
+
+X <- as.data.frame(scale(X))
+
+label <- read.table("../pd2-zbiory-benchmarkowe/fcps/twodiamonds.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- genie::hclust2(object = as.matrix(dist(X, method = "euclidean")), thresholdGini = 0.5)
+calculatedLabel <- cutree(result, length(unique(label$V1)))
+        
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+
+
+```
+
+\newpage
+### Ze standaryzacją zmiennych
+
+#### Zbiory dostarczone
+
+```{r gen_STA, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/genie_STAND.csv")
+x <- as.data.frame(summary)
+
+x3S <- x
+```
+
+
+```{r echo=FALSE, warning=FALSE, dependson='gen_STA'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 2],
+                   "0.2" = x[, 3],
+                   "0.3" = x[, 4],
+                   "0.4" = x[, 5],
+                   "0.5" = x[, 6], 
+                   "0.6" = x[, 7],
+                   "0.7" = x[, 8], 
+                   "0.8" = x[, 9], 
+                   "0.9" = x[, 10],
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='gen_STA'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 11],
+                   "0.2" = x[, 12],
+                   "0.3" = x[, 13],
+                   "0.4" = x[, 14],
+                   "0.5" = x[, 15], 
+                   "0.6" = x[, 16],
+                   "0.7" = x[, 17], 
+                   "0.8" = x[, 18], 
+                   "0.9" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+```{r my_gen_STAND, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_genie_STAND.csv")
+x <- as.data.frame(summary) 
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_gen_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 2],
+                   "0.2" = x[, 3],
+                   "0.3" = x[, 4],
+                   "0.4" = x[, 5],
+                   "0.5" = x[, 6], 
+                   "0.6" = x[, 7],
+                   "0.7" = x[, 8], 
+                   "0.8" = x[, 9], 
+                   "0.9" = x[, 10],
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_gen_STAND'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "0.1" = x[, 11],
+                   "0.2" = x[, 12],
+                   "0.3" = x[, 13],
+                   "0.4" = x[, 14],
+                   "0.5" = x[, 15], 
+                   "0.6" = x[, 16],
+                   "0.7" = x[, 17], 
+                   "0.8" = x[, 18], 
+                   "0.9" = x[, 19],
+                    check.names=FALSE))
+
+```
+
+
+#### przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("genie")
+
+X <- read.table("../pd2-zbiory-benchmarkowe/fcps/twodiamonds.data.gz", header = FALSE, sep = "", dec = ".")
+
+X <- as.data.frame(scale(X))
+
+label <- read.table("../pd2-zbiory-benchmarkowe/fcps/twodiamonds.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- genie::hclust2(object = as.matrix(dist(X, method = "euclidean")), thresholdGini = 0.5)
+calculatedLabel <- cutree(result, length(unique(label$V1)))
+        
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+
+
+```
+
+
+\newpage
+# Algorytm *HCPC*
+
+## Badanie algorytmu na wszystkich zbiorach benchmarkowych
+
+### Bez standaryzacji zmiennych
+
+#### Zbiory dostarczone
+
+```{r fourth, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/HCPC.csv")
+x <- as.data.frame(summary)
+x4 <- x
+```
+
+
+
+```{r echo=FALSE, warning=FALSE, dependson='fourth'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "FM" = x[, 2],
+                   "AM" = x[, 3],
+                    check.names=FALSE))
+
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+
+```{r my_HCPC, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_HCPC.csv")
+x <- as.data.frame(summary) 
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_HCPC'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "FM" = x[, 2],
+                   "AM" = x[, 3],
+                    check.names=FALSE))
+
+
+```
+
+
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("FactoMineR")
+X <- read.table("../pd2-zbiory-benchmarkowe/sipu/unbalance.data.gz", header = FALSE, sep = "", dec = ".")
+
+label <- read.table("../pd2-zbiory-benchmarkowe/sipu/unbalance.labels0.gz", header = FALSE, sep = "", dec = ".")
+        
+result <- FactoMineR::HCPC(res = X, nb.clust=length(unique(label$V1)), graph=FALSE)
+        
+        
+calculatedLabel <- result$data.clust$clust
+        
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+
+
+```
+
+
+\newpage
+### Ze standaryzacją zmiennych
+
+#### Zbiory dostarczone
+
+```{r HCPC_STA, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/HCPC_STAND.csv")
+x <- as.data.frame(summary)
+
+x4S <- x
+```
+
+
+```{r echo=FALSE, warning=FALSE, dependson='HCPC_STA'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "FM" = x[, 2],
+                   "AM" = x[, 3],
+                    check.names=FALSE))
+
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+
+```{r my_HCPC_STAND, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_HCPC_STAND.csv")
+x <- as.data.frame(summary) 
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_HCPC_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "FM" = x[, 2],
+                   "AM" = x[, 3],
+                    check.names=FALSE))
+```
+
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("FactoMineR")
+X <- read.table("../pd2-zbiory-benchmarkowe/sipu/unbalance.data.gz", header = FALSE, sep = "", dec = ".")
+
+X <- as.data.frame(scale(X))
+
+label <- read.table("../pd2-zbiory-benchmarkowe/sipu/unbalance.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+result <- FactoMineR::HCPC(res = X, nb.clust=length(unique(label$V1)), graph=FALSE)
+calculatedLabel <- result$data.clust$clust
+        
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+
+
+```
+
+
+\newpage
+# Algorytm *cmeans* z pakietu **e1071**
+
+## Badanie algorytmu na wszystkich zbiorach benchmarkowych
+
+### Bez standaryzacji zmiennych
+
+#### Zbiory dostarczone
+
+```{r fifth, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/cmeans.csv")
+x <- as.data.frame(summary)
+x5 <- x
+```
+
+
+
+```{r echo=FALSE, warning=FALSE, dependson='fifth'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='fifth'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 9],
+                   "3" = x[, 10],
+                   "4" = x[, 11],
+                   "5" = x[, 12],
+                   "6" = x[, 13], 
+                   "7" = x[, 14],
+                   "8" = x[, 15],
+                    check.names=FALSE))
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+
+```{r my_cmeans, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_cmeans.csv")
+x <- as.data.frame(summary) 
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_cmeans'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_cmeans'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 9],
+                   "3" = x[, 10],
+                   "4" = x[, 11],
+                   "5" = x[, 12],
+                   "6" = x[, 13], 
+                   "7" = x[, 14],
+                   "8" = x[, 15],
+                    check.names=FALSE))
+
+```
+
+
+
+#### Przykładowy zbiór 
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("e1071")
+
+X <- read.table("../pd2-zbiory-benchmarkowe/fcps/tetra.data.gz", header = FALSE, sep = "", dec = ".")
+
+label <- read.table("../pd2-zbiory-benchmarkowe/fcps/tetra.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+        
+result <- cmeans(x=X, centers = length(unique(label$V1)), dist='euclidean')
+
+calculatedLabel = result$cluster
+        
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+```
+
+
+\newpage
+### Ze standaryzacją zmiennych
+
+#### Zbiory destarczone
+
+```{r cmeans_STA, echo=FALSE, warning=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/cmeans_STAND.csv")
+x <- as.data.frame(summary)
+
+x5S <- x
+```
+
+
+```{r echo=FALSE, warning=FALSE, dependson='cmeans_STA'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='cmeans_STA'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 9],
+                   "3" = x[, 10],
+                   "4" = x[, 11],
+                   "5" = x[, 12],
+                   "6" = x[, 13], 
+                   "7" = x[, 14],
+                   "8" = x[, 15],
+                    check.names=FALSE))
+
+```
+
+#### Moje zbiory
+
+Wyniki działania na moich zbiorach danych przedstawiają się następująco:
+
+
+```{r my_cmeans_STAND, echo=FALSE, warning=FALSE, message=FALSE}
+# include library printing table
+library("formattable")
+
+summary <- read.csv("../benchmarkResults/my_cmeans_STAND.csv")
+x <- as.data.frame(summary) 
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_cmeans_STAND'}
+color2 <- "green"
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 2],
+                   "3" = x[, 3],
+                   "4" = x[, 4],
+                   "5" = x[, 5],
+                   "6" = x[, 6], 
+                   "7" = x[, 7],
+                   "8" = x[, 8], 
+                    check.names=FALSE))
+
+
+```
+
+```{r echo=FALSE, warning=FALSE, dependson='my_cmeans_STAND'}
+color2 <- "green"
+
+knitr::kable(data.frame(set = x[, 1],
+                   "2" = x[, 9],
+                   "3" = x[, 10],
+                   "4" = x[, 11],
+                   "5" = x[, 12],
+                   "6" = x[, 13], 
+                   "7" = x[, 14],
+                   "8" = x[, 15],
+                    check.names=FALSE))
+
+```
+
+
+
+#### Przykładowy zbiór
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library("e1071")
+X <- read.table("../pd2-zbiory-benchmarkowe/fcps/tetra.data.gz", header = FALSE, sep = "", dec = ".")
+
+X <- as.data.frame(scale(X))
+
+label <- read.table("../pd2-zbiory-benchmarkowe/fcps/tetra.labels0.gz", header = FALSE, sep = "", dec = ".")
+
+        
+result <- cmeans(x=X, centers = length(unique(label$V1)), dist='euclidean')
+
+calculatedLabel = result$cluster
+        
+
+par(mfrow = c(2, 1))
+par(mar=c(2,2,2,2))
+
+plot(X[, 1], X[, 2], main="labels from algorithms", type = "p", col=calculatedLabel)
+
+plot(X[, 1], X[, 2], main="true labels", type = "p", col=label$V1)
+
+```
+
+\newpage
+# Podsumowanie
+
+## *genie*
+
+Na podstawie tabel możemy zauważyć, iż najlepszym algorytmem jest algorytm *genie*. Właściwie dla wszystkich zbiorów algorytm znalazł prawie, że idealne rozwiązanie. Jednak nie widzimy znaczącej różnicy pomiędzy danymi ustandaryzowanymi a danymi bez standaryzacji. Wg mnie wynika to głównie z tego, iż dane tu są już po części standaryzowane. Pewne różnice mogą być widoczne na etapie czasu wykonania danych funkcji. 
+
+
+Na podstawie wykresów widzimy, iż najlepszym parametrem dla tego algorytmu jest wartość 0.3. Dla parametrów *tresholdGieni* z zakresu od 0.7 do 0.8 wartość błędu jest większa niż dla innych wartości. 
+
+### Bez standaryzacji zmiennych
+
+
+Poniżej jest przedstawiony *barplot* dla algorytmu *genie* (indeks *AM*) w zależności od parametru *thresholdGini*:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='third'}
+
+names(x3) <- seq(0.1, 0.9, 0.1)
+
+boxplot(x3[, 2:9])
+
+
+```
+
+Najlepszym parametrem *tresholdGieni* jest wartość 0.3 (swoją drogą jest to wartość defaultowa).
+
+
+### Ze standaryzacją zmiennych
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='gen_STA'}
+
+names(x3S) <- seq(0.1, 0.9, 0.1)
+
+boxplot(x3S[, 2:9])
+
+
+```
+
+Najlepszym parametrem *tresholdGieni* są wartości od 0.3 do 0.8. Wartości te dają podobne wyniki.
+
+
+## *hclust*
+
+Na podstawie tabel możemy zauważyć, iż najlepszą metodą dla algorytmów hierarchicznych z pakietu *hclust* jest metoda *ward.D2*, gdyż średni błąd wg wykresu jest najmniejszy oraz odchylenie standardowe nie jest zbyt duże.  
+
+Jednak nie widzimy znaczącej różnicy pomiędzy danymi ustandaryzowanymi a danymi bez standaryzacji. Wg mnie wynika to głównie z tego, iż dane tu są już po części standaryzowane. Pewne różnice mogą być widoczne na etapie czasu wykonania danych funkcji. 
+
+
+Ponadto na podstaiwe wykresu możemy zauważyć, iż metoda *complete* radzi sobie najgorzej.
+
+### Bez standaryzacji zmiennych
+
+Poniżej jest przedstawiony *barplot* dla algorytmu *hclust* (indeks *AM*) w zależności od metody clusteringu:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='second'}
+methodList <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+names(x2) <- methodList
+
+boxplot(x2[, 2:8])
+
+```
+
+Najlepszą metodą jest metoda *ward.D2*.
+
+### Ze standaryzacją zmiennych
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='sMLC_STAND'}
+methodList <- c("ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+names(x2S) <- methodList
+
+boxplot(x2S[, 2:8])
+
+
+```
+
+Najlepszą metodą jest metoda *ward.D2*.
+
+
+## *spectral_clustering*
+
+Algorytm zaimlementowany przeze mnie daje satyfakcjonujące wyniki. Widać drobną poprawę, gdy wykonaliśmy standaryzację zmiennych.
+
+### Bez standaryzacją zmiennych 
+
+Poniżej jest przedstawiony *barplot* dla algorytmu *spectral_clustering* (indeks *FM*) w zależności od parametru *M*:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='first'}
+
+names(x1) <- seq(-8, 10, 1)
+
+boxplot(x1[, 11:19])
+
+
+```
+
+Najlepszym parametrem jest *M = 3*.
+
+### Ze standaryzacją zmiennych
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='sc_STA'}
+
+names(x1S) <- seq(-8, 10, 1)
+
+boxplot(x1S[, 11:19])
+
+
+```
+
+Najlepszym parametrem jest *M = 2*.
+
+## *HCPC*
+
+Przy algorytmie *HCPC* nie badałem żadnego współczynnika. Algorytm przy ustawieniach defaultowych wypadł gorzej niż *genie*. Algorytm daje podobne rezultaty co algorytm zaimplementowany przeze mnie oraz *ward.D2*.
+
+### Bez standaryzacji zmiennych
+
+Poniżej jest przedstawiony *barplot* dla algorytmu *HCPC* bez standaryzacji zmiennych:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='fourth'}
+
+names(x4[, 2:3]) <- c("AM", "FM")
+
+boxplot(x4[, 2:3])
+
+
+```
+
+### Ze standaryzacją zmiennych
+
+Poniżej jest przedstawiony *barplot* dla algorytmu *HCPC* ze standaryzacją zmiennych:
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='HCPC_STA'}
+
+names(x4S) <- c(NA,"AM", "FM")
+
+boxplot(x4S[, 2:3])
+
+
+```
+
+
+## *cmeans*
+
+Algorytm *cmeans* nie wypada najlepiej na tle innych.  
+
+### Bez standaryzacji zmiennych
+
+Poniżej jest przedstawiony *barplot* dla algorytmu *cmeans*:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4,  dependson='fifth'}
+
+names(x5) <- seq(1, 8, 1)
+
+boxplot(x5[, 2:8])
+
+
+```
+Najlepszym parametrem dla tego algorytmu bez standaryzacji jest wartość *rate.par = 4*, gdyż dla tego parametru średnia wartość jest największa.
+
+### Ze standaryzacją zmiennych
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align='center', fig.width=10, fig.height=4, dependson='my_cmeans_STAND'}
+
+names(x5S) <- seq(1, 8, 1)
+
+boxplot(x5S[, 2:8])
+
+
+```
+
+Najlepszym parametrem dla tego algorytmu ze standaryzacją jest wartość *rate.par = 3*.
